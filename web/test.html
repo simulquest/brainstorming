@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Gemini Live Web (Pure JS / Sans NPM)</title>
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 40px; background: #121212; color: #fff; }
+    input, button { padding: 12px; margin: 8px; font-size: 16px; border-radius: 6px; border: none; }
+    input[type="text"] { width: 350px; }
+    button { cursor: pointer; background: #007bff; color: white; }
+    button:disabled { background: #555; }
+    #status { margin-top: 15px; font-weight: bold; color: #ffca28; }
+  </style>
+</head>
+<body>
+
+  <h2>Gemini Live (Navigateur Pure JS)</h2>
+
+  <div>
+    <input type="text" id="apiKey" placeholder="Entrez votre clé API Gemini" />
+  </div>
+
+  <div>
+    <button id="btnStart">Démarrer la voix</button>
+    <button id="btnStop" disabled>Arrêter</button>
+  </div>
+
+  <div id="status">Statut : En attente</div>
+
+  <script>
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const apiKeyInput = document.getElementById('apiKey');
+    const statusDiv = document.getElementById('status');
+
+    let ws = null;
+    let audioCtx = null;
+    let playAudioCtx = null;
+    let mediaStream = null;
+    let scriptProcessor = null;
+    let nextPlayTime = 0;
+
+    btnStart.addEventListener('click', async () => {
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) {
+        alert("Veuillez entrer une clé API Gemini !");
+        return;
+      }
+
+      statusDiv.textContent = "Connexion WebSocket...";
+
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+
+      ws = new WebSocket(wsUrl);
+      
+      // FORCER LA RÉCEPTION EN ARRAYBUFFER POUR ÉVITER LES ERREURS BLOB
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        statusDiv.textContent = "Connecté ! Envoi de la configuration...";
+        console.log("WebSocket Ouvert");
+
+        // Configuration initiale de la session Gemini
+        const setupMessage = {
+          setup: {
+            model: "models/gemini-3.1-flash-live-preview",
+            generationConfig: {
+              responseModalities: ["AUDIO"]
+            }
+          }
+        };
+
+        ws.send(JSON.stringify(setupMessage));
+        
+        initPlayback();
+        startMicrophone();
+
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+        statusDiv.textContent = "Session active (Parlez dans votre micro) !";
+      };
+
+      ws.onmessage = async (event) => {
+        let textData = '';
+
+        // Décodage universel sécurisé des données reçues du WebSocket
+        if (typeof event.data === 'string') {
+          textData = event.data;
+        } else if (event.data instanceof ArrayBuffer) {
+          textData = new TextDecoder().decode(event.data);
+        } else if (event.data instanceof Blob) {
+          textData = await event.data.text();
+        }
+
+        try {
+          const response = JSON.parse(textData);
+          console.log("Message Gemini reçu :", response);
+
+          // Extraction de l'audio retourné par Gemini
+          if (response.serverContent?.modelTurn?.parts) {
+            for (const part of response.serverContent.modelTurn.parts) {
+              if (part.inlineData && part.inlineData.data) {
+                playPCMChunk(part.inlineData.data);
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Erreur de décodage du message reçu :", err, textData);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("Erreur WebSocket :", err);
+        statusDiv.textContent = "Erreur de connexion WebSocket.";
+      };
+
+      ws.onclose = (event) => {
+        console.log("WebSocket Fermé :", event.reason);
+        statusDiv.textContent = `Déconnecté (${event.reason || 'Session fermée'})`;
+        stopSession();
+      };
+    });
+
+    btnStop.addEventListener('click', () => {
+      if (ws) ws.close();
+      stopSession();
+    });
+
+    function stopSession() {
+      if (scriptProcessor) scriptProcessor.disconnect();
+      if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+      if (audioCtx) audioCtx.close();
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+    }
+
+    // --- CAPTURE DU MICROPHONE (16kHz PCM Int16 -> Base64) ---
+    async function startMicrophone() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const source = audioCtx.createMediaStreamSource(mediaStream);
+      scriptProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
+
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(audioCtx.destination);
+
+      scriptProcessor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(inputData.length);
+        
+        for (let i = 0; i < inputData.length; i++) {
+          let s = Math.max(-1, Math.min(1, inputData[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+
+        const bytes = new Uint8Array(pcm16.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64PCM = btoa(binary);
+
+        // NOUVEAU FORMAT CONFORME (realtimeInput.audio)
+        const audioMessage = {
+          realtimeInput: {
+            audio: {
+              mimeType: "audio/pcm;rate=16000",
+              data: base64PCM
+            }
+          }
+        };
+
+        ws.send(JSON.stringify(audioMessage));
+      };
+    }
+
+    // --- LECTURE AUDIO DE LA RÉPONSE (24kHz PCM Float32) ---
+    function initPlayback() {
+      playAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      nextPlayTime = playAudioCtx.currentTime;
+    }
+
+    function playPCMChunk(base64PCM) {
+      if (!playAudioCtx) return;
+
+      const binary = atob(base64PCM);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const int16Array = new Int16Array(bytes.buffer);
+      const float32Array = new Float32Array(int16Array.length);
+      for (let i = 0; i < int16Array.length; i++) {
+        float32Array[i] = int16Array[i] / 32768.0;
+      }
+
+      const buffer = playAudioCtx.createBuffer(1, float32Array.length, 24000);
+      buffer.getChannelData(0).set(float32Array);
+
+      const source = playAudioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(playAudioCtx.destination);
+
+      const currentTime = playAudioCtx.currentTime;
+      if (nextPlayTime < currentTime) {
+        nextPlayTime = currentTime;
+      }
+      source.start(nextPlayTime);
+      nextPlayTime += buffer.duration;
+    }
+  </script>
+
+</body>
+</html>

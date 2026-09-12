@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>Brain Storming - Voice Chat (Web)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+</head>
+<body>
+  <div id="app">
+    <!-- Menu Toggle (masqué sur desktop via CSS) -->
+    <button id="menu-toggle" class="menu-btn" aria-label="Ouvrir le menu">
+      <i class="fa-solid fa-bars"></i>
+    </button>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-logo"><i class="fa-solid fa-brain"></i></span>
+        <h2>Conversations</h2>
+      </div>
+      <button id="new-conversation-btn" class="new-conv-btn">
+        <i class="fa-solid fa-plus"></i> Nouvelle conversation
+      </button>
+      <ul id="conversation-list" class="conv-list">
+        <!-- Rempli par JS -->
+      </ul>
+    </aside>
+
+    <!-- Overlay pour fermer la sidebar (mobile uniquement) -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <!-- Contenu principal -->
+    <main class="main-content">
+      <header>
+        <div class="header-content">
+          <div class="logo">
+            <span class="logo-icon"><i class="fa-solid fa-brain"></i></span>
+            <h1>Brain Storming</h1>
+          </div>
+          <div id="connection-indicator" class="status-pill">Hors ligne</div>
+        </div>
+      </header>
+
+      <section class="card">
+        <!-- Card Header -->
+        <div class="card-header">
+          <div>
+            <h2 id="conv-title">Voice Chat</h2>
+            <p class="meta" id="conv-meta">Parlez, le modèle répond en voix</p>
+          </div>
+        </div>
+
+        <!-- Réglages (repliable) -->
+        <details class="settings-panel" id="settings-panel">
+          <summary class="settings-summary">
+            <span><i class="fa-solid fa-gear"></i> Réglages</span>
+            <span class="settings-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+          </summary>
+          <div class="settings-grid">
+            <div class="field">
+              <label for="api-key-input">Clé API Gemini</label>
+              <input id="api-key-input" type="password" placeholder="Entrez votre clé" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="api-key-resume-input">Clé API Résumé</label>
+              <input id="api-key-resume-input" type="password" placeholder="Entrez votre clé" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="end-point-input">Endpoint Résumé</label>
+              <input id="end-point-input" type="text" placeholder="https://api.openai.com/v1/chat/completions" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="model-input">Modèle</label>
+              <input id="model-input" type="text" placeholder="openai-fast" autocomplete="off" />
+            </div>
+            <div class="field full-width">
+              <label for="system-instruction-text">Instruction système</label>
+              <textarea id="system-instruction-text" rows="2" placeholder="Vous êtes un assistant utile, clair et concis."></textarea>
+            </div>
+            <div class="field full-width">
+              <label for="voice-select">Voix du modèle (prochaine connexion)</label>
+              <select id="voice-select" class="voice-select">
+                <option value="Puck">Puck — Dynamique</option>
+                <option value="Charon">Charon — Grave</option>
+                <option value="Kore">Kore — Douce</option>
+                <option value="Fenrir">Fenrir — Énergique</option>
+                <option value="Aoede" selected>Aoede — Claire</option>
+                <option value="Leda">Leda — Calme</option>
+                <option value="Orus">Orus — Posée</option>
+              </select>
+              <p class="voice-select-hint">La même voix est conservée entre les sessions.</p>
+            </div>
+          </div>
+        </details>
+
+        <!-- Voice Controls -->
+        <div class="voice-controls">
+          <div class="btn-group">
+            <button id="btn-voice-start" class="primary-btn">
+              <span class="btn-icon"><i class="fa-solid fa-play"></i></span> Démarrer
+            </button>
+            <button id="btn-voice-stop" class="secondary-btn" disabled>
+              <span class="btn-icon"><i class="fa-solid fa-stop"></i></span> Arrêter
+            </button>
+          </div>
+
+          <div class="meter-row">
+            <span class="meter-label">Audio</span>
+            <div class="meter">
+              <div id="audio-level" class="meter-fill"></div>
+            </div>
+          </div>
+
+          <p id="voice-status" class="result">Prêt à démarrer</p>
+        </div>
+
+        <!-- Transcript -->
+        <div class="transcript-card">
+          <div class="transcript-header">
+            <span class="transcript-title">Conversation</span>
+            <span class="transcript-count" id="message-count">0 messages</span>
+          </div>
+          <div id="voice-transcript" class="transcript">Aucune conversation enregistrée.</div>
+        </div>
+
+        <!-- Actions -->
+        <div class="action-row">
+          <button id="btn-download-conv" class="action-btn hidden">
+            <span class="btn-icon"><i class="fa-solid fa-download"></i></span> Télécharger
+          </button>
+          <button id="btn-generate-report" class="action-btn hidden">
+            <span class="btn-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span> Générer le résumé
+          </button>
+          <button id="btn-generate-mermaid" class="action-btn hidden">
+            <span class="btn-icon"><i class="fa-solid fa-diagram-project"></i></span> Générer le graphique
+          </button>
+          <button id="btn-download-summary" class="action-btn hidden">
+            <span class="btn-icon"><i class="fa-solid fa-file-arrow-down"></i></span> Télécharger le résumé
+          </button>
+          <button id="btn-download-graph" class="action-btn hidden">
+            <span class="btn-icon"><i class="fa-solid fa-image"></i></span> Télécharger le graphique
+          </button>
+        </div>
+
+        <!-- Report -->
+        <div id="report-text" class="report-text"></div>
+
+        <!-- Mermaid -->
+        <div id="mermaid-container" class="mermaid-container hidden">
+          <div class="mermaid-header">
+            <span class="mermaid-title">Graphique du projet</span>
+            <button id="btn-graph-fullscreen" class="action-btn graph-fullscreen-btn">
+              <span class="btn-icon"><i class="fa-solid fa-expand"></i></span> Plein écran &amp; éditer
+            </button>
+          </div>
+          <div id="mermaid-diagram" class="mermaid-diagram"></div>
+          <pre id="mermaid-code" class="mermaid-code"></pre>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Overlay : éditeur graphique plein écran -->
+  <div id="graph-overlay" class="graph-overlay hidden">
+    <div class="graph-overlay-header">
+      <span class="graph-overlay-title">Graphique interactif</span>
+      <div class="graph-zoom-controls">
+        <button id="graph-zoom-out" class="icon-btn" title="Zoom arrière"><i class="fa-solid fa-minus"></i></button>
+        <span id="graph-zoom-level" class="graph-zoom-level">100%</span>
+        <button id="graph-zoom-in" class="icon-btn" title="Zoom avant"><i class="fa-solid fa-plus"></i></button>
+        <button id="graph-zoom-reset" class="icon-btn" title="Réinitialiser"><i class="fa-solid fa-rotate-right"></i></button>
+      </div>
+      <button id="graph-close" class="graph-close" title="Fermer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <div id="graph-canvas" class="graph-canvas">
+      <div id="graph-render" class="graph-render"></div>
+    </div>
+
+    <div id="graph-branches" class="graph-branches">
+      <div class="graph-branches-header">
+        <span class="graph-branches-title">Branches visibles</span>
+        <div class="graph-branches-actions">
+          <button id="graph-branches-all" class="mini-btn">Tout</button>
+          <button id="graph-branches-none" class="mini-btn">Aucune</button>
+        </div>
+      </div>
+      <div id="graph-branches-list" class="graph-branches-list"></div>
+    </div>
+
+    <div class="graph-editor">
+      <div class="graph-editor-header">
+        <span class="graph-editor-title">Code Mermaid (modifiable)</span>
+        <button id="graph-apply" class="action-btn graph-apply-btn">Appliquer</button>
+      </div>
+      <textarea id="graph-code" class="graph-code" spellcheck="false" placeholder="Editez le code Mermaid ici..."></textarea>
+    </div>
+
+    <div class="graph-chat">
+      <div class="graph-chat-header">
+        <span class="graph-chat-title">Discuter avec l'IA</span>
+      </div>
+      <div id="graph-chat-messages" class="graph-chat-messages"></div>
+      <div class="graph-chat-input-row">
+        <input id="graph-chat-input" type="text" placeholder="Question sur le graphique…" autocomplete="off" />
+        <button id="graph-chat-send" class="action-btn graph-send-btn">Envoyer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mermaid via CDN (pas de npm / pas de build). Expose window.mermaid. -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
