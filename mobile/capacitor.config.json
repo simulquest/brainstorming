@@ -1,0 +1,8 @@
+{
+  "appId": "com.brain.storming",
+  "appName": "Brain Storming",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
